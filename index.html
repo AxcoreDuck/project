@@ -1,1 +1,257 @@
-# project
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Simple GIF Editor (Code-Only)</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+      background: #f4f4f4;
+    }
+    .canvas-area {
+      background: #fff;
+      padding: 10px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px #0001;
+      display: inline-block;
+      margin-bottom: 10px;
+    }
+    #frame-list {
+      margin: 10px 0;
+      padding: 0;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    #frame-list button {
+      padding: 5px 8px;
+      font-size: 12px;
+      margin-right: 2px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      background: #fafafa;
+      cursor: pointer;
+    }
+    .selected-frame {
+      border: 2px solid #2196f3 !important;
+      background: #e3f2fd !important;
+    }
+    .toolbar {
+      margin: 10px 0;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    label {
+      font-size: 13px;
+      margin-right: 4px;
+    }
+    .preview {
+      display: inline-block;
+      vertical-align: middle;
+      margin-left: 32px;
+    }
+  </style>
+</head>
+<body>
+  <h2>GIF Editor (Code Frames Only)</h2>
+  <div class="canvas-area">
+    <canvas id="draw-canvas" width="160" height="120" style="border:1px solid #ccc; background:white"></canvas>
+  </div>
+  <div class="toolbar">
+    <button id="add-frame">เพิ่มเฟรมใหม่</button>
+    <button id="delete-frame">ลบเฟรม</button>
+    <button id="copy-frame">คัดลอกเฟรม</button>
+    <button id="clear-frame">ล้างเฟรม</button>
+    <button id="save-json">บันทึกเฟรม (JSON)</button>
+    <input type="file" id="load-json" accept=".json" style="display:none">
+    <button id="load-json-btn">โหลดเฟรม (JSON)</button>
+    <button id="export-gif">ดาวน์โหลด GIF</button>
+    <label>ความเร็ว: <input id="fps" type="number" value="6" min="1" max="60" style="width:50px"> fps</label>
+    <button id="play-preview">แสดงตัวอย่าง</button>
+  </div>
+  <div id="frame-list"></div>
+  <div class="preview">
+    <canvas id="preview-canvas" width="160" height="120" style="border:1px solid #ccc;"></canvas>
+    <div id="preview-info"></div>
+  </div>
+  <hr>
+  <b>เครื่องมือวาด:</b> <br>
+  <label>สี <input type="color" id="color" value="#000000"></label>
+  <label>ขนาด <input type="range" id="size" min="1" max="20" value="4"></label>
+  <button id="eraser">ยางลบ</button>
+
+  <script src="https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.worker.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.min.js"></script>
+  <script>
+    // --- Data ---
+    let frames = [];
+    let nowIndex = 0;
+    let isDrawing = false;
+    let lastPos = null;
+    let erasing = false;
+    let color = "#000000";
+    let size = 4;
+    let fps = 6;
+
+    const canvas = document.getElementById('draw-canvas');
+    const ctx = canvas.getContext('2d');
+    const previewCanvas = document.getElementById('preview-canvas');
+    const previewCtx = previewCanvas.getContext('2d');
+    const frameListDiv = document.getElementById('frame-list');
+
+    function blankFrame() {
+      let f = document.createElement('canvas');
+      f.width = canvas.width; f.height = canvas.height;
+      let c = f.getContext('2d');
+      c.fillStyle = "#fff"; c.fillRect(0,0,f.width,f.height);
+      return f;
+    }
+
+    function updateFrameList() {
+      frameListDiv.innerHTML = '';
+      frames.forEach((f,i)=>{
+        let thumb = document.createElement('canvas');
+        thumb.width=40; thumb.height=30;
+        let tctx=thumb.getContext('2d');
+        tctx.drawImage(f,0,0,40,30);
+        thumb.className = (i===nowIndex)?"selected-frame":"";
+        thumb.title = "เฟรม " + (i+1);
+        thumb.onclick = ()=>{nowIndex=i; loadCurrentFrame(); updateFrameList();}
+        frameListDiv.appendChild(thumb);
+      });
+    }
+
+    function saveToCurrentFrame() {
+      let f = frames[nowIndex];
+      let c = f.getContext('2d');
+      c.drawImage(canvas,0,0);
+    }
+
+    function loadCurrentFrame() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(frames[nowIndex],0,0);
+    }
+
+    function addFrame(copyCurrent=false) {
+      let f = blankFrame();
+      if(copyCurrent && frames.length) {
+        f.getContext('2d').drawImage(frames[nowIndex],0,0);
+      }
+      frames.splice(nowIndex+1,0,f);
+      nowIndex++;
+      loadCurrentFrame();
+      updateFrameList();
+    }
+
+    function deleteFrame() {
+      if(frames.length <= 1) return;
+      frames.splice(nowIndex,1);
+      nowIndex = Math.max(0, nowIndex-1);
+      loadCurrentFrame();
+      updateFrameList();
+    }
+
+    function clearFrame() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      saveToCurrentFrame();
+      updateFrameList();
+    }
+
+    // --- Drawing ---
+    canvas.onmousedown = e => {
+      isDrawing = true;
+      lastPos = [e.offsetX, e.offsetY];
+    };
+    canvas.onmouseup = ()=>{ isDrawing = false; lastPos = null; saveToCurrentFrame(); updateFrameList(); };
+    canvas.onmouseleave = ()=>{ isDrawing = false; lastPos = null; };
+    canvas.onmousemove = e => {
+      if(!isDrawing) return;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = erasing ? "#fff" : color;
+      ctx.lineWidth = size;
+      ctx.beginPath();
+      ctx.moveTo(...lastPos);
+      ctx.lineTo(e.offsetX, e.offsetY);
+      ctx.stroke();
+      lastPos = [e.offsetX, e.offsetY];
+    };
+    // --- Toolbar ---
+    document.getElementById('add-frame').onclick = ()=>addFrame(false);
+    document.getElementById('delete-frame').onclick = deleteFrame;
+    document.getElementById('copy-frame').onclick = ()=>addFrame(true);
+    document.getElementById('clear-frame').onclick = clearFrame;
+    document.getElementById('color').onchange = e=>{color=e.target.value; erasing=false;};
+    document.getElementById('size').oninput = e=>{size=+e.target.value;};
+    document.getElementById('eraser').onclick = ()=>{erasing=true;};
+    document.getElementById('fps').oninput = e=>{fps=+e.target.value;};
+    // --- Save/Load JSON ---
+    document.getElementById('save-json').onclick = ()=>{
+      saveToCurrentFrame();
+      let arr = frames.map(f=>f.toDataURL());
+      let blob = new Blob([JSON.stringify(arr)],{type:"application/json"});
+      let url = URL.createObjectURL(blob);
+      let a = document.createElement('a');
+      a.href = url; a.download = "frames.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    document.getElementById('load-json-btn').onclick = ()=>{document.getElementById('load-json').click();};
+    document.getElementById('load-json').onchange = e=>{
+      let file = e.target.files[0];
+      if(!file) return;
+      let reader = new FileReader();
+      reader.onload = evt=>{
+        try {
+          let arr = JSON.parse(evt.target.result);
+          frames = arr.map(data=>{
+            let img = new window.Image();
+            let c = blankFrame();
+            img.onload = ()=>{c.getContext('2d').drawImage(img,0,0);}
+            img.src = data;
+            return c;
+          });
+          nowIndex = 0;
+          setTimeout(()=>{loadCurrentFrame();updateFrameList();},100);
+        } catch(err) { alert("ไฟล์ผิดรูปแบบ"); }
+      };
+      reader.readAsText(file);
+    };
+    // --- Export GIF ---
+    document.getElementById('export-gif').onclick = ()=>{
+      saveToCurrentFrame();
+      let gif = new GIF({workers:2, quality:10, width:canvas.width, height:canvas.height});
+      for(let f of frames) gif.addFrame(f,{delay:1000/fps});
+      gif.on('finished', blob=>{
+        let url = URL.createObjectURL(blob);
+        let a = document.createElement('a');
+        a.href=url; a.download="output.gif"; a.click();
+        URL.revokeObjectURL(url);
+      });
+      gif.render();
+    };
+    // --- Preview ---
+    function playPreview() {
+      let i=0;
+      let interval = setInterval(()=>{
+        previewCtx.clearRect(0,0,previewCanvas.width,previewCanvas.height);
+        previewCtx.drawImage(frames[i],0,0,previewCanvas.width,previewCanvas.height);
+        document.getElementById('preview-info').innerText = `เฟรมที่ ${i+1} / ${frames.length}`;
+        i = (i+1)%frames.length;
+      }, 1000/fps);
+      setTimeout(()=>clearInterval(interval), 4000); // เล่น preview 4 วินาที
+    }
+    document.getElementById('play-preview').onclick = playPreview;
+
+    // --- Init ---
+    // เริ่มต้นมี 1 เฟรม
+    frames.push(blankFrame());
+    loadCurrentFrame();
+    updateFrameList();
+  </script>
+</body>
+</html>
